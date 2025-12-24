@@ -30,27 +30,10 @@ PLSDiagnosticsParamsEngine class >> document: aDocument [
 { #category : 'accessing' }
 PLSDiagnosticsParamsEngine >> computeDiagnostics [
 
-	| ast diagnostics |
-	ast := self sourceIsMethod
-		       ifTrue: [ "use RB parser for method"
-		       RBParser parseFaultyMethod: source ]
-		       ifFalse: [ "use Opal default Compiler for scripting "
-			       self class compiler
-				       source: source;
-				       isScripting: true;
-				       failBlock: [ nil ];
-				       requestor: self requestor;
-				       permitFaulty: true;
-				       parse ].
-	diagnostics := OrderedCollection new.
-	ast acceptVisitor:
-		(RBParseErrorNodeVisitor new visitBlock: [ :aErrorBlock |
-			 diagnostics add: (PLSDiagnostic new
-					  message: aErrorBlock errorMessage;
-					  range: (PLSRange
-							   start: (source toLineCharacter: aErrorBlock start)
-							   end: (source toLineCharacter: aErrorBlock stop))) ]).
-	^ diagnostics
+	(MiApplication current itemsFor: DCLViolation)
+		select: [ :v | v sourceFile = self document uri ]
+		thenCollect: #asPLSDiagnostic
+
 ]
 
 { #category : 'accessing' }

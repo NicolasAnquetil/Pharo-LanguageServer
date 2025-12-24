@@ -78,6 +78,7 @@ PLSAbstractServer >> codeActionForDocument: textDocument atRange: range withCont
 PLSAbstractServer >> codeLensTextDocument: textDocument [
 
 	<jrpc: #'textDocument/codeLens'>
+'textDocument/codeLens' record.
 	^ (self context textItem: (textDocument at: #uri)) codeLens
 ]
 
@@ -385,6 +386,19 @@ PLSAbstractServer >> start [
 	self initializeStreams.
 	currentId := 0.
 	self startAnswerLoop
+]
+
+{ #category : 'plp - answerLoop' }
+PLSAbstractServer >> startAnswerLoop [
+
+'PLSAbstractServer >> startAnswerLoop' record.
+	process := [
+	           [ answerLoop ] whileTrue: [
+		           | request |
+		           request := self extractRequestFrom: clientInStream.
+		           self handleRequest: request toClient: clientOutStream ] ]
+		           forkAt: self answerLoopPriority
+		           named: 'JRPC TCP connection'
 ]
 
 { #category : 'stopping' }
