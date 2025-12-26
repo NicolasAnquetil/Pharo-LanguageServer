@@ -30,8 +30,8 @@ PLSDiagnosticsParamsEngine class >> document: aDocument [
 { #category : 'accessing' }
 PLSDiagnosticsParamsEngine >> computeDiagnostics [
 
-	(MiApplication current itemsFor: DCLViolation)
-		select: [ :v | v sourceFile = self document uri ]
+	^(MiApplication current itemsFor: DCLViolation)
+		select: [ :v | ('file://' , v sourceFile) = self document uri ]
 		thenCollect: #asPLSDiagnostic
 
 ]
