@@ -12,6 +12,21 @@ FamixTIndexedFileNavigation >> asPLSRange [
 ]
 
 { #category : '*PharoLanguageServer' }
+FamixTIndexedFileNavigation >> lineColumn: position in: lines [
+
+	| remaining eol |
+	remaining := position.
+	eol := OSPlatform current lineEnding size. 
+	lines withIndicesDo: [ :line :i |
+		(line size > remaining) 
+			ifTrue: [ ^{ i . remaining } ].
+		remaining := remaining - line size - eol
+	].
+
+	^{ lines size . (lines last size) }
+]
+
+{ #category : '*PharoLanguageServer' }
 FamixTIndexedFileNavigation >> toLineCharacter: aPosition in: lines [
 	"Converts a '{line-index . character-index}' to a dictionary
 	 converts also from 1 based indices to 0 based"
