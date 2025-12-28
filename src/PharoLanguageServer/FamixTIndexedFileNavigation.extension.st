@@ -6,7 +6,7 @@ FamixTIndexedFileNavigation >> asPLSRange [
 	| lines |
 	lines := self fileReference contents lines.
 
-	PLSRange
+	^PLSRange
 		start: (self toLineCharacter: self startPos in: lines)
 		end:   (self toLineCharacter: self endPos   in: lines)
 ]
@@ -17,10 +17,10 @@ FamixTIndexedFileNavigation >> lineColumn: position in: lines [
 	| remaining eol |
 	remaining := position.
 	eol := OSPlatform current lineEnding size. 
-	lines withIndicesDo: [ :line :i |
-		(line size > remaining) 
+	lines withIndexDo: [ :aLine :i |
+		(aLine size > remaining) 
 			ifTrue: [ ^{ i . remaining } ].
-		remaining := remaining - line size - eol
+		remaining := remaining - aLine size - eol
 	].
 
 	^{ lines size . (lines last size) }
