@@ -136,13 +136,17 @@ TPLPCommon >> sendCancelRequest: id [
 { #category : 'plp - answerLoop' }
 TPLPCommon >> startAnswerLoop [
 
+	answerLoop := true.
+
 	process := [
-	           [ answerLoop ] whileTrue: [
-		           | request |
-		           request := self extractRequestFrom: clientInStream.
-		           self handleRequest: request toClient: clientOutStream ] ]
-		           forkAt: self answerLoopPriority
-		           named: 'JRPC TCP connection'
+		[ answerLoop ] whileTrue: [
+			| request |
+			request := self extractRequestFrom: clientInStream.
+			self handleRequest: request toClient: clientOutStream.
+		]
+	]
+	forkAt: self answerLoopPriority
+	named: 'LanguageServerProtocol server'
 ]
 
 { #category : 'plp - answerLoop' }

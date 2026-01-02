@@ -126,29 +126,35 @@ PLSAbstractServer >> getHeaderFor: answer into: aStream [
 PLSAbstractServer >> handleRequest: request toClient: clientSocket [
 
 	| jrpcMessage |
+
 	jrpcMessage := [ self parseJSON: request ]
-		               on: Error
-		               do: [ :err |
-			               self debugMode
-				               ifTrue: [ err pass ]
-				               ifFalse: [ err return: err asJRPCResponse ] ].
+		on: Error
+		do: [ :err |
+			self debugMode
+				ifTrue: [ err pass ]
+				ifFalse: [ err return: err asJRPCResponse ]
+		].
+
 	jrpcMessage id ifNotNil: [
 		currentId := currentId max: jrpcMessage id asInteger ].
-	^ self messageProcess: jrpcMessage id put: ([
-		   self
-			   sendData: (self handleJSON: jrpcMessage)
-			   toClient: clientSocket.
-		   [ self removeMessageProcess: jrpcMessage id ]
-			   on: KeyNotFound
-			   do: [  ] ]
-			   forkAt: self answerLoopPriority
-			   named: jrpcMessage id printString)
+
+	^self
+		messageProcess: jrpcMessage id
+		put: ([
+			self
+				sendData: (self handleJSON: jrpcMessage)
+				toClient: clientSocket.
+			[ self removeMessageProcess: jrpcMessage id ] on: KeyNotFound do: [ ]
+			]
+			forkAt: self answerLoopPriority
+			named: jrpcMessage id printString)
 ]
 
 { #category : 'initialization' }
 PLSAbstractServer >> initialize [
 
 	super initialize.
+
 	messageProcessor := PLSMessageProcessor new.
 	self addHandlersFromPragmasIn: self.
 	self debugMode: false.
@@ -221,6 +227,7 @@ PLSAbstractServer >> logTrace: aString withAdditionnalInformation: verboseString
 
 { #category : 'context' }
 PLSAbstractServer >> messageProcess: anId	put: aProcess [
+
 	self context messageProcessesAt: anId put: aProcess
 ]
 
@@ -275,6 +282,7 @@ PLSAbstractServer >> postDealAnswer: answer [
 
 { #category : 'context' }
 PLSAbstractServer >> removeMessageProcess: anId [
+
 	self context removeMessageProcess: anId
 ]
 
@@ -289,7 +297,8 @@ PLSAbstractServer >> sendData: answer2 toClient: stream [
 	answer2 ifNotEmpty: [
 		self getHeaderFor: answer2 into: stream.
 		stream << answer2 utf8Encoded.
-		stream flush ]
+		stream flush
+	]
 ]
 
 { #category : 'lsp - diagnostics' }
@@ -328,6 +337,7 @@ PLSAbstractServer >> serverExit [
 PLSAbstractServer >> serverInitialized [
 
 	<jrpc: #initialized>
+
 	self logTrace: 'initialized' withAdditionnalInformation: ''
 ]
 
@@ -386,19 +396,6 @@ PLSAbstractServer >> start [
 	self initializeStreams.
 	currentId := 0.
 	self startAnswerLoop
-]
-
-{ #category : 'plp - answerLoop' }
-PLSAbstractServer >> startAnswerLoop [
-
-'PLSAbstractServer >> startAnswerLoop' record.
-	process := [
-	           [ answerLoop ] whileTrue: [
-		           | request |
-		           request := self extractRequestFrom: clientInStream.
-		           self handleRequest: request toClient: clientOutStream ] ]
-		           forkAt: self answerLoopPriority
-		           named: 'JRPC TCP connection'
 ]
 
 { #category : 'stopping' }

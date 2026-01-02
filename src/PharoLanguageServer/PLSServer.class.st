@@ -140,6 +140,7 @@ PLSServer >> didOpen: textDocument [
 
 	<jrpc: #'textDocument/didOpen'>
 	| document diagnostics |
+
 	document := self context
 		textItem: (textDocument at: #uri)
 		put: (PLSDocument from: textDocument).
@@ -336,8 +337,12 @@ PLSServer >> plsGtkInspectIt: line textDocument: textDocumentURI [
 
 	<jrpc: #'pls-gtk:inspectIt'>
 	| app compiler answer2 |
+
 	compiler := self compilerFor: (textDocumentURI at: #path).
-	answer2 := [ compiler evaluate: line ] on: Exception do: [ :error | 'error' record. error ].
+	answer2 := [ compiler evaluate: line ]
+		on: Exception
+		do: [ :error | 'error' record. error ].
+
 	[ 
 	app := SpApplication new
 		       useBackend: #Gtk;
@@ -346,9 +351,9 @@ PLSServer >> plsGtkInspectIt: line textDocument: textDocumentURI [
 	(StInspectorPresenter onObject: answer2)
 		application: app;
 		open ]
-		on: Error
-		do: [ :err | ^ err message printString ].
-	'opened with spec' record.
+	on: Error
+	do: [ :err | ^ err message printString ].
+
 	^ 'ok'
 ]
 
@@ -428,7 +433,7 @@ PLSServer >> plsTestPackages [
 { #category : 'dap' }
 PLSServer >> startDapServer [
 	<jrpc: #'dap:startServer'>
-	'Start DAP Server.' record.
+
 	^ DAPServer new
 		start.
 ]
