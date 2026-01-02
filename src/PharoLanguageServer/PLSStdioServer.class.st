@@ -1,0 +1,566 @@
+"
+I am the server. 
+I also include all the pharo language features.
+
+Methods in `lsp` protocol are standard language server protocol feature.
+
+Methods in `pls` protocol are pharo language server feature.
+"
+Class {
+	#name : 'PLSStdioServer',
+	#superclass : 'PLSAbstractServer',
+	#category : 'PharoLanguageServer',
+	#package : 'PharoLanguageServer'
+}
+
+{ #category : 'pls - variables' }
+PLSStdioServer >> childrenVariables: variableReference in: textDocument [
+
+	<jrpc: #'pls:childrenVariables'>
+	| document references currentVariable |
+	document := self context textItem: (textDocument at: #uri at: #path).
+	references := Stack newFrom: (variableReference substrings: '/').
+	currentVariable := document binder bindings at: references pop.
+	[ references isEmpty ] whileFalse: [
+		| goTo |
+		goTo := references pop.
+		currentVariable := currentVariable instVarNamed: goTo asSymbol ].
+	^ (currentVariable class allInstVarNames collectWithIndex: [ :name :idx |
+		   PLSVariable new
+			   name: name;
+			   value: (currentVariable instVarAt: idx) printString;
+			   variableReference: variableReference , '/' , name;
+			   isDirectory:
+				   (currentVariable instVarAt: idx) class allInstVarNames
+					   isNotEmpty;
+			   yourself ]) asArray
+]
+
+{ #category : 'lsp - code lens' }
+PLSStdioServer >> codeLenResolves: range command: command data: aData [
+	<jrpc: #'codeLens/resolve'>
+	self flag: 'Not use in this version. All is done by codeLensTextDocument:'
+]
+
+{ #category : 'commands' }
+PLSStdioServer >> commandNotebookPrintIt: line textDocument: textDocumentURI [
+
+	<jrpc: #'command:notebookPrintIt'>
+	| compiler answer2 |
+	"Use path because #external also uses the fragment number of the cell"
+	compiler := self compilerFor: (textDocumentURI at: #path).
+	answer2 := [ compiler evaluate: line ]
+		           on: Exception
+		           do: [ :error | 
+			           'error' record.
+			           error ].
+	^ answer2 asPLSCellOutput asJRPCJSON
+]
+
+{ #category : 'commands' }
+PLSStdioServer >> commandPharoLanguageServerVersion [
+	<jrpc: #'command:version'>
+	^ '1.0.0'
+]
+
+{ #category : 'commands' }
+PLSStdioServer >> commandPharoPrintIt: line textDocument: textDocumentURI [
+	<jrpc: #'command:printIt'>
+	"This textDocumentURI from VSCode is strange"
+	| compiler answer2 | 
+	compiler := self compilerFor: (textDocumentURI at: #path).
+	answer2 := compiler evaluate: line.
+	^ answer2 plsPrintString
+]
+
+{ #category : 'commands' }
+PLSStdioServer >> commandPharoSave [
+	<jrpc: #'command:save'>
+	SmalltalkImage current snapshot: true andQuit: false.
+	^ 'Image saved'
+]
+
+{ #category : 'accessing' }
+PLSStdioServer >> compilerFor: fileURI [
+
+	| compiler |
+	compiler := SmalltalkImage current compiler
+		            failBlock: [ nil ];
+		            yourself.
+	fileURI ifNotNil: [
+		compiler requestor: (self context textItem: fileURI) binder ].
+	^ compiler
+]
+
+{ #category : 'lsp - text synchronisation' }
+PLSStdioServer >> didChange: textDocument contentChanges: contentChanges [
+
+	<jrpc: #'textDocument/didChange'>
+	| document |
+	document := self context
+		            textItem: (textDocument at: #uri)
+		            ifAbsent: [
+			            self didOpen: textDocument.
+			            self context textItem: (textDocument at: #uri) ].
+	document version: (textDocument at: #version).
+	document text: (contentChanges anyOne at: #text).
+	"If diagnostic is not nil, we are in a pull diagnostic context. Else, we are in a push diagnostic context"
+	self context clientContext capabilities textDocument ifNotNil: [ :td |
+		td diagnostic ifNil: [
+			self
+				sendData: (self convertJRPCJsonableObjectToJSON:
+						 ((JRPCNotificationObject method:
+							   'textDocument/publishDiagnostics') params:
+							  document diagnostics) asJRPCJSON)
+				toClient: clientOutStream ] ]
+]
+
+{ #category : 'lsp - text synchronisation' }
+PLSStdioServer >> didClose: textDocument [
+	<jrpc: #'textDocument/didClose'>
+	| document |
+	document := self context removeItem: (textDocument at: #uri).
+	(self isTonelDocument: textDocument)
+		ifFalse: [ self
+				sendData:
+					(self
+						convertJRPCJsonableObjectToJSON:
+							((JRPCNotificationObject method: 'textDocument/publishDiagnostics')
+								params:
+									(PLSPublishDiagnosticsParams new
+										diagnostics: {};
+										uri: document uri;
+										version: document version;
+										yourself)) asJRPCJSON)
+				toClient: clientOutStream ]
+]
+
+{ #category : 'lsp - text synchronisation' }
+PLSStdioServer >> didOpen: textDocument [
+
+	<jrpc: #'textDocument/didOpen'>
+	| document diagnostics |
+
+	document := self context
+		textItem: (textDocument at: #uri)
+		put: (PLSDocument from: textDocument).
+	document server: self.
+	diagnostics := ((PLSDiagnosticsParamsEngine document: document)
+		requestor: document binder) computeDiagnostics.
+
+	self
+		sendData: (self convertJRPCJsonableObjectToJSON:
+			((JRPCNotificationObject method:
+				'textDocument/publishDiagnostics') params:
+					(PLSPublishDiagnosticsParams new
+						diagnostics: diagnostics asArray;
+						uri: document uri;
+						version: document version;
+						yourself)
+						asJRPCJSON)
+				asJRPCJSON)
+		toClient: clientOutStream
+]
+
+{ #category : 'lsp - text synchronisation' }
+PLSStdioServer >> didSave: textDocument text: text [
+	<jrpc: #'textDocument/didSave'>
+	"Install the code in the image if the code is part of a tonel file"
+	((textDocument at: #uri) endsWith: 'class.st')
+		ifTrue: [ (PLSTonelParser parseString: text asByteArray utf8Decoded) do: #load ]
+]
+
+{ #category : 'lsp - document symbol' }
+PLSStdioServer >> documentSymbol: textDocument [
+
+	<jrpc: #'textDocument/documentSymbol'>
+	| document |
+	document := self context textItem: (textDocument at: #uri).
+	^ document symbols
+]
+
+{ #category : 'pls - variables' }
+PLSStdioServer >> documentVariables: textDocument [
+	<jrpc: #'pls:documentVariables'>
+	| document |
+	document := self context
+		textItem: (textDocument at: #uri at: #path).
+	^ (document binder bindings associations
+		collect: [ :assoc |
+			  PLSVariable new
+				name: assoc key printString;
+				value: assoc value printString;
+				variableReference: assoc key;
+				isDirectory: assoc value class allInstVarNames isNotEmpty;
+				yourself ]
+		as: Array) asJRPCJSON
+]
+
+{ #category : 'lsp - formatting' }
+PLSStdioServer >> formatTextDocument: textDocument withOptions: options [
+	<jrpc: #'textDocument/formatting'>
+	| codeSource formatter lines endPosition |
+	codeSource := (self context textItem: (textDocument at: #uri)) text.
+	lines := codeSource lines.
+	endPosition := PLSPosition new
+		line: lines size;
+		character: lines last size;
+		yourself.
+	formatter := (self isTonelDocument: textDocument)
+		ifFalse: [ PLSFormater new sourceCode: codeSource ]
+		ifTrue: [ PLSTonelFormater new sourceCode: codeSource ].
+	^ {(PLSTextEdit new
+		newText: formatter formated;
+		range:
+			(PLSRange new
+				start:
+					(PLSPosition new
+						line: 0;
+						character: 0;
+						yourself);
+				end: endPosition;
+				yourself))}
+]
+
+{ #category : 'pls - ice' }
+PLSStdioServer >> iceRepositories [
+
+	<jrpc: #'pls-ice:repositories'>
+	^ (IceRepository registry collect: [ :repository | 
+		   { 
+			   (#name -> repository name).
+			   (#valid -> repository isValid) } asDictionary ]) asArray
+]
+
+{ #category : 'pls - ice' }
+PLSStdioServer >> iceRepository: aRepositoryName [
+
+	<jrpc: #'pls-ice:repository'>
+	| repoOfInterest set |
+	repoOfInterest := IceRepository registry detect: [ :repository | 
+		                  repository name = aRepositoryName ].
+	set := (repoOfInterest workingCopy diffToReferenceCommit tree
+		        allChildren
+		        select: [ :a | a children isEmpty ]
+		        thenCollect: [ :a | a definition actualClass ]) asSet.
+	^ (set collect: #plsURIString) asArray
+]
+
+{ #category : 'initialization' }
+PLSStdioServer >> initialize [
+
+	super initialize.
+	withStdIO := true.
+]
+
+{ #category : 'lsp - formatting' }
+PLSStdioServer >> isTonelDocument: textDocument [
+	^ ((textDocument at: #uri) endsWith: 'class.st') or: [ (textDocument at: #uri) endsWith: 'extension.st' ]
+]
+
+{ #category : 'lsp - initialization' }
+PLSStdioServer >> onInitializeTrace: trace processId: processId locale: locale clientInfo: clientInfo rootPath: rootPath workspaceFolders: workspaceFolders capabilities: capabilities rootUri: rootUri [
+
+	<jrpc: #initialize>
+
+	self context clientContext: (PLPInitializeParams new
+			 trace: trace;
+			 processId: processId;
+			 locale: locale;
+			 clientInfo: clientInfo;
+			 rootPath: rootPath;
+			 workspaceFolders: workspaceFolders;
+			 capabilities: (PLPClientCapabilities from: capabilities);
+			 rootUri: rootUri;
+			 yourself).
+	trace ifNotNil: [ self context traceValue: trace ].
+
+	^ PLSInitializeResult new
+]
+
+{ #category : 'pls' }
+PLSStdioServer >> plsExecuteClass: class test: testMethod [
+	<jrpc: #'pls:executeClassTest'>
+	| result |
+	result := (self class environment at: class asSymbol)
+		run: testMethod asSymbol.
+	^ result printString
+	"{(#failures -> (result failures collect: #printString as: Array)).
+	(#errors -> (result errors collect: #printString as: Array)).
+	(#skipped -> (result skipped collect: #printString as: Array)).
+	(#passed -> (result passed collect: #printString as: Array))}
+		asDictionary"
+]
+
+{ #category : 'pls' }
+PLSStdioServer >> plsExecuteClassTests: className [
+	<jrpc: #'pls:executeClassTests'>
+	| result |
+	result := (self class environment at: className asSymbol) suite run.
+	^ result printString
+	"{(#failures -> (result failures collect: #printString as: Array)).
+	(#errors -> (result errors collect: #printString as: Array)).
+	(#skipped -> (result skipped collect: #printString as: Array)).
+	(#passed -> (result passed collect: #printString as: Array))}
+		asDictionary"
+]
+
+{ #category : 'pls' }
+PLSStdioServer >> plsGetClassContent: class [
+
+	<jrpc: #'pls:classContent'>
+	| className |
+	className := ((class substrings: '/') last withoutSuffix: '.st')
+		             withoutSuffix: '.class'.
+	^ String streamContents: [ :stream |
+		  TonelWriter
+			  exportClass: (self class environment at: className asSymbol)
+			  on: stream ]
+]
+
+{ #category : 'pls' }
+PLSStdioServer >> plsGetClasses: package [
+	<jrpc: #'pls:classes'>
+	^ [ package asPackage classes
+		collect: [ :class | package , '/' , class name , '.class.st' ]
+		as: Array ]
+		on: Error
+		do: [ {} asArray ]
+]
+
+{ #category : 'pls' }
+PLSStdioServer >> plsGetPackages [
+	<jrpc: #'pls:packages'>
+	^ (self packageOrganizer packages collect: #name)
+		asArray
+]
+
+{ #category : 'pls - gtk' }
+PLSStdioServer >> plsGtkInspectIt: line textDocument: textDocumentURI [
+
+	"| compiler inspector |
+	compiler := self compilerFor: nil.
+	inspector := (PLSApplication current new: StInspector).
+	inspector model: (StInspectorModel on: ([ compiler evaluate: line ] on: Exception do: [ :error | error ])).
+	inspector openWithSpec."
+
+	<jrpc: #'pls-gtk:inspectIt'>
+	| app compiler answer2 |
+	compiler := self compilerFor: (textDocumentURI at: #path).
+	answer2 := [ compiler evaluate: line ]
+		on: Exception
+		do: [ :error | 'error' record. error ].
+	[
+		app := SpApplication new
+			useBackend: #Gtk;
+			yourself.
+
+		(StInspectorPresenter onObject: answer2)
+			application: app;
+			open
+	]
+	on: Error
+	do: [ :err | ^ err message printString ].
+
+	^ 'ok'
+]
+
+{ #category : 'pls - developer' }
+PLSStdioServer >> plsOpenLog [
+
+	<jrpc: #'pls-developer:openLog'>
+	(TinyLogger default ensureMoreFileLoggerNamed: 'LSP.log') open.
+	^ 'success'
+]
+
+{ #category : 'pls - developer' }
+PLSStdioServer >> plsResetLog [
+
+	<jrpc: #'pls-developer:clearLog'>
+	(TinyLogger default ensureMoreFileLoggerNamed: 'LSP.log') clearLog.
+	^ 'success'
+]
+
+{ #category : 'pls - tests' }
+PLSStdioServer >> plsTestExecuteTest: aTestURI [
+
+	<jrpc: #'pls:test-execute-test'>
+	| className result |
+	className := ((aTestURI at: #path) substrings: '/') last
+		             withoutSuffix: '.class.st'.
+	result := (self class environment at: className asSymbol) run:
+		          (aTestURI at: #fragment) asSymbol.
+	^ {
+		  (#failures -> (result failures collect: #printString as: Array)).
+		  (#errors -> (result errors collect: #printString as: Array)).
+		  (#skipped -> (result skipped collect: #printString as: Array)).
+		  (#passed -> (result passed collect: #printString as: Array)) }
+		  asDictionary
+]
+
+{ #category : 'pls - tests' }
+PLSStdioServer >> plsTestInClass: aClassURI [
+
+	<jrpc: #'pls:test-in-class'>
+	| className |
+	className := ((aClassURI at: #path) substrings: '/') last
+		             withoutSuffix: '.class.st'.
+		
+	^ (self class environment at: className asSymbol) suite tests
+		  collect: [ :test | (aClassURI at: #external) , '#' , test selector ]
+		  as: Array
+]
+
+{ #category : 'pls - tests' }
+PLSStdioServer >> plsTestInPackage: aPackageURI [
+
+	<jrpc: #'pls:test-in-package'>
+	^ [
+	  (((aPackageURI at: #path) withoutPrefix: '/') asPackage classes select: [ :class |
+		   (class name endsWith: 'Tests') or: [ class name endsWith: 'Test' ] ])
+		  collect: [ :class | class plsURIString ]
+		  as: Array ]
+		  on: Error
+		  do: [ {  } asArray ]
+]
+
+{ #category : 'pls - tests' }
+PLSStdioServer >> plsTestPackages [
+
+	<jrpc: #'pls:test-packages'>
+	^ (TestCase allSubclasses
+		   reject: #isAbstract
+		   thenCollect: [ :class | class package ]) asSet
+		  collect: [ :package | package plsURIString ]
+		  as: Array
+
+	"'pharoImage://' , class package name , '/' , class name
+			   , '.class.st'"
+]
+
+{ #category : 'dap' }
+PLSStdioServer >> startDapServer [
+	<jrpc: #'dap:startServer'>
+
+	^ DAPServer new
+		start.
+]
+
+{ #category : 'lsp - completion' }
+PLSStdioServer >> textDocumentCompletionWithContext: context position: position textDocument: textDocument [
+
+	<jrpc: #'textDocument/completion'>
+	| completionList completionTool |
+	completionTool := PLSCompletion new
+		                  source:
+			                  (self context textItem: (textDocument at: #uri))
+				                  text;
+		                  position: position;
+		                  yourself.
+	(self isTonelDocument: textDocument) ifTrue: [ 
+		completionTool sourceClass: (([ 
+			  PLSTonelParser parseString:
+				  (self context textItem: (textDocument at: #uri)) text ]
+				  on: Error
+				  do: [ ^ {  } ]) detect: #isClassDefinition) actualClass ].
+	completionList := PLSCompletionList new.
+	completionList completionItems: completionTool entries asArray.
+	^ completionList
+]
+
+{ #category : 'lsp - hover' }
+PLSStdioServer >> textDocumentHoverWithPosition: position textDocument: textDocument [
+	<jrpc: #'textDocument/hover'>
+	| hover document |
+	document := (self context textItem: (textDocument at: #uri)). 
+	hover := PLSHover new
+		context: self context;
+		source: document;
+		position: position;
+		yourself.
+	^ { #contents -> hover contents } asDictionary
+]
+
+{ #category : 'lsp - completion' }
+PLSStdioServer >> textDocumentInlineCompletionWithContext: context position: position textDocument: textDocument [
+
+	<jrpc: #'textDocument/inlineCompletion'>
+	| internalTextDocument api answer userPosition result |
+	internalTextDocument := self context textItem:
+		                        (textDocument at: #uri).
+	userPosition := internalTextDocument text plsToPosition: position.
+	api := LLMAPI fim.
+	api host: 'api.mistral.ai'.
+
+	api payload
+		temperature: 0.2;
+		model: 'codestral-2501';
+		top_p: 1;
+		max_tokens: 250;
+		prompt: (internalTextDocument text copyFrom: 1 to: userPosition).
+	userPosition = internalTextDocument text size ifFalse: [
+		api payload suffix: (internalTextDocument text
+				 copyFrom: userPosition
+				 to: internalTextDocument text size) ].
+
+	result := api performRequest.
+	answer := result choices anyOne message content.
+
+	^ (PLSInlineCompletionList new
+		   items: { (PLSInlineCompletionItem new insertText:
+					    (self postDealAnswer: answer)) };
+		   yourself) asJRPCJSON
+]
+
+{ #category : 'lsp - signature help' }
+PLSStdioServer >> textDocumentSignatureHelpWithPosition: position textDocument: textDocument anContext: context [
+	<jrpc: #'textDocument/signatureHelp'>
+	| text positionChar selector node |
+	text := (self context textItem: (textDocument at: #uri)) text.
+	positionChar := text plsToPosition: position.
+	node := (RBParser parseFaultyExpression: text)
+		bestNodeFor: (Interval from: positionChar to: positionChar).
+	"Node can be nil with this piece of code: `true :` (the ':' is not correctly parsed, so node becomes nil)"
+	selector := (node isNotNil and: [ node isMessage ])
+		ifTrue: [ node selector ]
+		ifFalse: [ '' ].
+	^ PLSSignatureHelp new
+		signatures:
+			((SystemNavigation new allImplementorsOf: selector)
+				collect: [ :implementor | 
+					PLSSignatureInformation new
+						label: implementor printString;
+						documentation: implementor compiledMethod comment;
+						parameters:
+							(implementor argumentNames
+								collect: [ :name | 
+									PLSParameterInformation new
+										label: name;
+										yourself ]
+								as: Array);
+						yourself ]
+				as: Array);
+		yourself
+]
+
+{ #category : 'lsp - type definition' }
+PLSStdioServer >> typeDefinitionAt: position in: textDocument [
+
+	<jrpc: #'textDocument/typeDefinition'>
+	| document canBeClass aClass |
+	document := self context textItem: (textDocument at: #uri).
+	canBeClass := document nodeAt: position.
+	canBeClass ifNil: [ ^ {  } ].
+	((canBeClass isKindOf: RBProgramNode) not or: [ 
+		 canBeClass isVariable not ]) ifTrue: [ ^ {  } ].
+	aClass := self class environment
+		          at: canBeClass name asSymbol
+		          ifAbsent: [ ^ {  } ].
+	aClass isClass ifFalse: [ ^ {  } ].
+	^ PLSLocation new
+		  uri: aClass plsURIString;
+		  range: (PLSRange
+				   start: (PLSPosition line: 0 character: 0)
+				   end: (PLSPosition line: 0 character: 0));
+		  yourself
+]
