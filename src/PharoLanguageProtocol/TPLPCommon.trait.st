@@ -54,30 +54,36 @@ TPLPCommon >> extractRequestFrom: stream [
 	"data is the current buffer state"
 	data := ''.
 	length := -1.
+
 	[ length = -1 and: [ answerLoop ] ] whileTrue: [
 		[ data ifEmpty: [ data := stream plpNext: 25 ] ]
 			on: ConnectionTimedOut
-			do: [ self log: 'timeout but still work' ].
+			do: [ self log: 'timed out but still working' ].
 		length := self extractLengthOf: data ].
+
 	startingPoint := data indexOf: ${.
 	endPoint := data findCloseBracesFor: startingPoint.
 	result := String new: length.
+
 	"three options"
 	"startingPoint and endPoint are found"
 	(startingPoint ~= 0 and: [ endPoint ~= 0 ]) ifTrue: [
 		result := data copyFrom: startingPoint to: endPoint.
 		data := data copyFrom: endPoint + 1 to: data size.
 		^ result ].
+
 	startingPoint = 0
 		ifTrue: [ "none were found"
-			stream upTo: ${.
+			stream plpUpTo: ${.
 			result at: 1 put: ${.
 			stream nextInto: result startingAt: 2 ]
+
 		ifFalse: [ "only startingPoint is found"
 			(data copyFrom: startingPoint to: data size) withIndexDo: [
 				:each
 				:index | result at: index put: each ].
 			stream nextInto: result startingAt: data size - startingPoint + 2 ].
+
 	data := ''.
 	^ result
 ]

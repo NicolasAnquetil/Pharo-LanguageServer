@@ -5,3 +5,9 @@ ReadWriteStream >> plpNext: numberOfData [
 	
 	^ self next: numberOfData
 ]
+
+{ #category : '*PharoLanguageProtocol' }
+ReadWriteStream >> plpUpTo: delim [
+
+	^ self upTo: delim
+]
