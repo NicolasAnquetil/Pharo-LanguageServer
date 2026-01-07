@@ -8,7 +8,8 @@ Trait {
 		'process',
 		'answerLoopPriority',
 		'withStdIO',
-		'hasTCPServer'
+		'hasTCPServer',
+		'requestHandlingPriority'
 	],
 	#category : 'PharoLanguageProtocol',
 	#package : 'PharoLanguageProtocol'
@@ -16,9 +17,10 @@ Trait {
 
 { #category : 'plp - answerLoop' }
 TPLPCommon >> answerLoopPriority [
+	"If withStdIO is true, it is important that this priority be less than requestHandlingPriority"
 
 	^ answerLoopPriority ifNil: [
-		  answerLoopPriority := Processor lowIOPriority ]
+		  answerLoopPriority := self requestHandlingPriority - 1 ]
 ]
 
 { #category : 'accessing' }
@@ -123,6 +125,21 @@ TPLPCommon >> log: aString [
 TPLPCommon >> nextId [
 
 	^ currentId := currentId + 1
+]
+
+{ #category : 'plp - answerLoop' }
+TPLPCommon >> requestHandlingPriority [
+	"This should be less than the priority for reading the input stream from the client
+	 (which is lowIOPriority on stdin)"
+
+	^ requestHandlingPriority ifNil: [
+		  requestHandlingPriority := Processor lowIOPriority - 1 ]
+]
+
+{ #category : 'plp - answerLoop' }
+TPLPCommon >> requestHandlingPriority: priority [
+
+  requestHandlingPriority := priority 
 ]
 
 { #category : 'plp - base protocol' }

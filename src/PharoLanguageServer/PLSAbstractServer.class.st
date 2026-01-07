@@ -138,16 +138,16 @@ PLSAbstractServer >> handleRequest: request toClient: clientSocket [
 	jrpcMessage id ifNotNil: [
 		currentId := currentId max: jrpcMessage id asInteger ].
 
-	^"self
+	^self
 		messageProcess: jrpcMessage id
-		put: (["
+		put: ([
 			self
 				sendData: (self handleJSON: jrpcMessage)
 				toClient: clientSocket.
-			"[ self removeMessageProcess: jrpcMessage id ] on: KeyNotFound do: [ ]
+			[ self removeMessageProcess: jrpcMessage id ] on: KeyNotFound do: [ ]
 			]
-			forkAt: self answerLoopPriority
-			named: jrpcMessage id printString)"
+			forkAt: (self answerLoopPriority)
+			named: jrpcMessage id printString)
 ]
 
 { #category : 'initialization' }
