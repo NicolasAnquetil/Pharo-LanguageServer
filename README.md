@@ -87,10 +87,10 @@ server := PLSServer new
 
 
 The server should be able to be launched in "stdio" mode easily.
-The 'run-server.st' script needs changes to accomodate for that (see also 'withStdIO' below)
+The `run-server.st` script needs changes to accomodate for that (see also `withStdIO` variable below)
 
 Importants points:
-- `PLSAbstractServer>>initialize` initialize the variable `withStdIO` (which comes from `TPLPCommon`
+- `PLSAbstractServer>>initialize` initialize the variable `withStdIO` (which comes from `TPLPCommon`)
 - `PLSAbstractServer>>start`:
   - `initializeStreams` which checks `withStdIO` to initialize clientInStream/clientOutStream to Stdio or SocketStream
   - `startAnswerLoop` starts the main loop (client requests and server answers) in a process.
